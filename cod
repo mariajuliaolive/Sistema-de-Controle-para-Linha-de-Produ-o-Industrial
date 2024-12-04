@@ -1,0 +1,120 @@
+import threading
+import time
+import random
+from queue import Queue
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Configurações
+BUFFER_CAPACITY = 10
+NUM_PRODUCERS = 2
+NUM_CONSUMERS = 3
+TOTAL_TIMESTEPS = 100
+
+# Buffer e Controle
+buffer = Queue(maxsize=BUFFER_CAPACITY)
+buffer_lock = threading.Lock()
+items_available = threading.Semaphore(0)
+space_available = threading.Semaphore(BUFFER_CAPACITY)
+
+# Variáveis para coleta de dados
+data = {
+    "timestep": [],
+    "buffer_size": [],
+    "produced_items": [],
+    "consumed_items": []
+}
+timestep = 0
+produced_count = 0
+consumed_count = 0
+stop_event = threading.Event()  # Para sinalizar quando parar as threads
+
+
+# Produtores
+def producer(id):
+    global produced_count
+    while not stop_event.is_set():
+        time.sleep(random.uniform(0.1, 0.3))  # Simula o tempo de produção
+        space_available.acquire()
+        with buffer_lock:
+            buffer.put(f"Item-{id}")
+            produced_count += 1
+            print(f"Produtor {id} produziu. Buffer: {buffer.qsize()}")
+        items_available.release()
+
+
+# Consumidores
+def consumer(id):
+    global consumed_count
+    while not stop_event.is_set():
+        time.sleep(random.uniform(0.1, 0.3))  # Simula o tempo de consumo
+        items_available.acquire()
+        with buffer_lock:
+            if not buffer.empty():
+                buffer.get()
+                consumed_count += 1
+                print(f"Consumidor {id} consumiu. Buffer: {buffer.qsize()}")
+        space_available.release()
+
+
+# Monitoramento e coleta de dados
+def monitor():
+    global timestep
+    for _ in range(TOTAL_TIMESTEPS):
+        time.sleep(0.1)  # Simula o intervalo de monitoramento
+        with buffer_lock:
+            data["timestep"].append(timestep)
+            data["buffer_size"].append(buffer.qsize())
+            data["produced_items"].append(produced_count)
+            data["consumed_items"].append(consumed_count)
+        timestep += 1
+    stop_event.set()  # Sinaliza para as threads pararem
+
+
+# Execução das Threads
+threads = []
+
+# Iniciar produtores
+for i in range(NUM_PRODUCERS):
+    t = threading.Thread(target=producer, args=(i,))
+    threads.append(t)
+    t.start()
+
+# Iniciar consumidores
+for i in range(NUM_CONSUMERS):
+    t = threading.Thread(target=consumer, args=(i,))
+    threads.append(t)
+    t.start()
+
+# Iniciar monitoramento
+monitor_thread = threading.Thread(target=monitor)
+monitor_thread.start()
+
+# Aguardar todas as threads
+monitor_thread.join()
+for t in threads:
+    t.join()
+
+# Análise e Gráficos
+df = pd.DataFrame(data)
+
+# Gráfico do tamanho do buffer ao longo do tempo
+plt.figure(figsize=(10, 6))
+plt.plot(df["timestep"], df["buffer_size"], label="Buffer Size")
+plt.xlabel("Timestep")
+plt.ylabel("Buffer Size")
+plt.title("Buffer Size Over Time")
+plt.legend()
+plt.grid()
+plt.show()
+
+# Gráfico de produção e consumo
+plt.figure(figsize=(10, 6))
+plt.plot(df["timestep"], df["produced_items"], label="Produced Items", color="green")
+plt.plot(df["timestep"], df["consumed_items"], label="Consumed Items", color="red")
+plt.xlabel("Timestep")
+plt.ylabel("Cumulative Items")
+plt.title("Cumulative Production and Consumption")
+plt.legend()
+plt.grid()
+plt.show()
