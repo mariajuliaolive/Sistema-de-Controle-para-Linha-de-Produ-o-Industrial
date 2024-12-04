@@ -35,26 +35,26 @@ def producer(id):
     global produced_count
     while not stop_event.is_set():
         time.sleep(random.uniform(0.1, 0.3))  # Simula o tempo de produção
-        space_available.acquire()
-        with buffer_lock:
-            buffer.put(f"Item-{id}")
-            produced_count += 1
-            print(f"Produtor {id} produziu. Buffer: {buffer.qsize()}")
-        items_available.release()
+        if space_available.acquire(timeout=0.1):  # Evita deadlock
+            with buffer_lock:
+                if buffer.qsize() < BUFFER_CAPACITY:
+                    buffer.put(f"Item-{id}")
+                    produced_count += 1
+                    print(f"Produtor {id} produziu. Buffer: {buffer.qsize()}")
+            items_available.release()
 
 
 # Consumidores
 def consumer(id):
     global consumed_count
-    while not stop_event.is_set():
-        time.sleep(random.uniform(0.1, 0.3))  # Simula o tempo de consumo
-        items_available.acquire()
-        with buffer_lock:
-            if not buffer.empty():
-                buffer.get()
-                consumed_count += 1
-                print(f"Consumidor {id} consumiu. Buffer: {buffer.qsize()}")
-        space_available.release()
+    while not stop_event.is_set() or not buffer.empty():  # Permite consumir itens restantes
+        if items_available.acquire(timeout=0.1):  # Evita deadlock
+            with buffer_lock:
+                if not buffer.empty():
+                    buffer.get()
+                    consumed_count += 1
+                    print(f"Consumidor {id} consumiu. Buffer: {buffer.qsize()}")
+            space_available.release()
 
 
 # Monitoramento e coleta de dados
@@ -94,6 +94,9 @@ monitor_thread.start()
 monitor_thread.join()
 for t in threads:
     t.join()
+
+# Verificar estado final do buffer
+print(f"Estado final do buffer: {list(buffer.queue)}")
 
 # Análise e Gráficos
 df = pd.DataFrame(data)
